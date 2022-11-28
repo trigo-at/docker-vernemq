@@ -1,0 +1,12 @@
+# pushes to trigo-internal
+PROJECT=trigo-internal
+
+# Surpress image promotion
+TAG_ONLY=true
+
+# Skip Tests
+# SKIP_TESTS=true
+
+SOURCE_ROOT=/trigo
+
+PUBLISH_CONFIG=internal:internal
