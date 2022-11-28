@@ -7,6 +7,4 @@ TAG_ONLY=true
 # Skip Tests
 # SKIP_TESTS=true
 
-SOURCE_ROOT=vernemqtrigo/
-
 PUBLISH_CONFIG=internal:internal
