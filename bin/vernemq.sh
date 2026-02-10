@@ -19,6 +19,57 @@ istio_health() {
   return $status
 }
 
+configure_vernemq_listeners() {
+    local base_port=1883
+    declare -A listener_ports
+
+    # Scan environment variables for VerneMQ listeners
+    while read -r line; do
+        if [[ $line == DOCKER_VERNEMQ_LISTENER__* ]]; then
+            # Extract the type, name, and property from the environment variable
+            IFS='=' read -r key value <<< "$line"
+            IFS='__' read -r _ prefix type name property <<< "$key"
+
+            # Normalize type to lowercase for consistent handling
+            type=${type,,}
+
+            # Check if this listener is being added/enabled without specifying a port
+            if [[ -z $property && $value == "true" ]]; then
+                # Assign default or auto-incremented port number
+                if ! [[ ${listener_ports[$type.$name]+_} ]]; then
+                    base_port=$((base_port + 1))
+                    listener_ports[$type.$name]=$base_port
+                fi
+                echo "listener.$type.$name = ${I}:${listener_ports[$type.$name]}" >> ${VERNEMQ_CONF_FILE}
+            elif [[ $property == "PORT" ]]; then
+                # Specific port defined, use it
+                listener_ports[$type.$name]=$value
+                echo "listener.$type.$name = ${IP_ADDRESS}:${value}" >> ${VERNEMQ_CONF_FILE}
+            fi
+        fi
+    done < <(env)
+
+    # Ensure all initialized listeners are configured, even those without a PORT env var explicitly set
+    for listener in "${!listener_ports[@]}"; do
+        IFS='.' read -r type name <<< "$listener"
+        echo "listener.$type.$name = ${IP_ADDRESS}:${listener_ports[$listener]}" >> ${VERNEMQ_CONF_FILE}
+    done
+}
+
+configure_vernemq_listeners_help() {
+    echo "Usage: configure_vernemq_listeners"
+    echo "Scans environment variables to configure VerneMQ listeners."
+    echo "Environment variables should follow the pattern:"
+    echo "DOCKER_VERNEMQ_LISTENER__<type>__<name>[__PORT]=<value>"
+    echo "Examples:"
+    echo "DOCKER_VERNEMQ_LISTENER__TCP__EXTERNAL=true"
+    echo "DOCKER_VERNEMQ_LISTENER__WS__DEFAULT__PORT=8080"
+    echo ""
+    echo "The function assigns an IP address and ports to the VerneMQ listeners based on these variables."
+    echo "Listeners without a specified port will have ports auto-assigned starting from 1884."
+}
+
+
 # Ensure we have all files and needed directory write permissions
 if [ ! -d ${VERNEMQ_ETC_DIR} ]; then
   echo "Configuration directory at ${VERNEMQ_ETC_DIR} does not exist, exiting" >&2
@@ -57,7 +108,7 @@ if env | grep "DOCKER_VERNEMQ_NODENAME" -q; then
     sed -i.bak -r "s/-name VerneMQ@.+/-name VerneMQ@${DOCKER_VERNEMQ_NODENAME}/" ${VERNEMQ_VM_ARGS_FILE}
 else
     if [ -n "$DOCKER_VERNEMQ_SWARM" ]; then
-        NODENAME=$(hostname -i)
+        NODENAME=$(ip -4 -o addr show ${NET_INTERFACE} | awk '{print $4}' | cut -d "/" -f 1)
         sed -i.bak -r "s/VerneMQ@.+/VerneMQ@${NODENAME}/" ${VERNEMQ_VM_ARGS_FILE}
     else
         sed -i.bak -r "s/-name VerneMQ@.+/-name VerneMQ@${IP_ADDRESS}/" ${VERNEMQ_VM_ARGS_FILE}
@@ -84,7 +135,7 @@ if env | grep "DOCKER_VERNEMQ_DISCOVERY_NODE" -q; then
     fi
 
     sed -i.bak -r "/-eval.+/d" ${VERNEMQ_VM_ARGS_FILE}
-    echo "-eval \"vmq_server_cmd:node_join('VerneMQ@$discovery_node')\"" >> ${VERNEMQ_VM_ARGS_FILE}
+    printf '\n%s\n' "-eval \"vmq_server_cmd:node_join('VerneMQ@$discovery_node')\"" >> ${VERNEMQ_VM_ARGS_FILE}
 fi
 
 # If you encounter "SSL certification error (subject name does not match the host name)", you may try to set DOCKER_VERNEMQ_KUBERNETES_INSECURE to "1".
@@ -139,6 +190,7 @@ if [ -d "${SECRETS_KUBERNETES_DIR}" ] ; then
 fi
 
 # Set up kubernetes node discovery
+start_join_cluster=0
 if env | grep "DOCKER_VERNEMQ_DISCOVERY_KUBERNETES" -q; then
     # Let's set our nodename correctly
     # https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.19/#list-pod-v1-core
@@ -152,7 +204,7 @@ if env | grep "DOCKER_VERNEMQ_DISCOVERY_KUBERNETES" -q; then
 
     sed -i.bak -r "s/VerneMQ@.+/VerneMQ@${VERNEMQ_KUBERNETES_HOSTNAME}/" ${VERNEMQ_VM_ARGS_FILE}
     # Hack into K8S DNS resolution (temporarily)
-    kube_pod_names=$(echo ${podList} | jq '.items[].spec.hostname' | sed 's/"//g' | tr '\n' ' ')
+    kube_pod_names=$(echo ${podList} | jq '.items[].spec.hostname' | sed 's/"//g' | tr '\n' ' ' | sed 's/ *$//')
 
     for kube_pod_name in $kube_pod_names; do
         if [[ $kube_pod_name == "null" ]]; then
@@ -162,13 +214,13 @@ if env | grep "DOCKER_VERNEMQ_DISCOVERY_KUBERNETES" -q; then
         fi
         if [[ $kube_pod_name != $MY_POD_NAME ]]; then
             discoveryHostname="${kube_pod_name}.${VERNEMQ_KUBERNETES_SUBDOMAIN}.${DOCKER_VERNEMQ_KUBERNETES_NAMESPACE}.svc.${DOCKER_VERNEMQ_KUBERNETES_CLUSTER_NAME}"
+            start_join_cluster=1
             echo "Will join an existing Kubernetes cluster with discovery node at ${discoveryHostname}"
-            echo "-eval \"vmq_server_cmd:node_join('VerneMQ@${discoveryHostname}')\"" >> ${VERNEMQ_VM_ARGS_FILE}
-            echo "Did I previously leave the cluster? If so, purging old state."
+            printf '\n%s\n' "-eval \"vmq_server_cmd:node_join('VerneMQ@${discoveryHostname}')\"" >> ${VERNEMQ_VM_ARGS_FILE}
             curl -fsSL http://${discoveryHostname}:8888/status.json >/dev/null 2>&1 ||
                 (echo "Can't download status.json, better to exit now" && exit 1)
             curl -fsSL http://${discoveryHostname}:8888/status.json | grep -q ${VERNEMQ_KUBERNETES_HOSTNAME} ||
-                (echo "Cluster doesn't know about me, this means I've left previously. Purging old state..." && rm -rf /vernemq/data/*)
+                (echo "Cluster doesn't know about me, this means I've left previously or I'm a new node.")
             break
         fi
     done
@@ -199,6 +251,7 @@ $password
 EOF
     done
 
+
     if [ -z "$DOCKER_VERNEMQ_ERLANG__DISTRIBUTION__PORT_RANGE__MINIMUM" ]; then
         echo "erlang.distribution.port_range.minimum = 9100" >> ${VERNEMQ_CONF_FILE}
     fi
@@ -208,6 +261,7 @@ EOF
     fi
 
     if [ -z "$DOCKER_VERNEMQ_LISTENER__TCP__DEFAULT" ]; then
+    configure_vernemq_listeners
         echo "listener.tcp.default = ${IP_ADDRESS}:1883" >> ${VERNEMQ_CONF_FILE}
     fi
 
@@ -222,6 +276,8 @@ EOF
     if [ -z "$DOCKER_VERNEMQ_LISTENER__HTTP__METRICS" ]; then
         echo "listener.http.metrics = ${IP_ADDRESS}:8888" >> ${VERNEMQ_CONF_FILE}
     fi
+    	
+    configure_vernemq_listeners
 
     echo "########## End ##########" >> ${VERNEMQ_CONF_FILE}
 fi
@@ -262,47 +318,15 @@ siguser1_handler() {
 sigterm_handler() {
     if [ $pid -ne 0 ]; then
         if [ -d "${SECRETS_KUBERNETES_DIR}" ] ; then
-            # this will stop the VerneMQ process, but first drain the node from all existing client sessions (-k)
+            # This will stop the VerneMQ process
             if [ -n "$VERNEMQ_KUBERNETES_HOSTNAME" ]; then
                 terminating_node_name=VerneMQ@$VERNEMQ_KUBERNETES_HOSTNAME
             else
                 terminating_node_name=VerneMQ@$IP_ADDRESS
             fi
-            podList=$(k8sCurlGet "api/v1/namespaces/${DOCKER_VERNEMQ_KUBERNETES_NAMESPACE}/pods?labelSelector=${DOCKER_VERNEMQ_KUBERNETES_LABEL_SELECTOR}")
-            kube_pod_names=$(echo ${podList} | jq '.items[].spec.hostname' | sed 's/"//g' | tr '\n' ' ')
-            if [ "$kube_pod_names" = "$MY_POD_NAME" ]; then
-                echo "I'm the only pod remaining. Not performing leave and/or state purge."
-                /vernemq/bin/vmq-admin node stop >/dev/null
-            else
-                # https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.19/#read-pod-v1-core
-                podResponse=$(k8sCurlGet api/v1/namespaces/${DOCKER_VERNEMQ_KUBERNETES_NAMESPACE}/pods/$(hostname) )
-                statefulSetName=$(echo ${podResponse} | jq -r '.metadata.ownerReferences[0].name')
-
-                # https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.19/#-strong-read-operations-statefulset-v1-apps-strong-
-                statefulSetResponse=$(k8sCurlGet "apis/apps/v1/namespaces/${DOCKER_VERNEMQ_KUBERNETES_NAMESPACE}/statefulsets/${statefulSetName}" )
-
-                isCodeForbidden=$(echo ${statefulSetResponse} | jq '.code == 403')
-                if [[ ${isCodeForbidden} == "true" ]]; then
-                    echo "Permission error: Cannot access URL ${statefulSetPath}: $(echo ${statefulSetResponse} | jq '.reason,.code,.message')"
-                fi
-
-                reschedule=$(echo ${statefulSetResponse} | jq '.status.replicas == .status.readyReplicas')
-                scaled_down=$(echo ${statefulSetResponse} | jq '.status.currentReplicas == .status.updatedReplicas')
-
-                if [[ $reschedule == "true" ]]; then
-                    # Perhaps is an scale down?
-                    if [[ $scaled_down == "true" ]]; then
-                      echo "Seems that this is a scale down scenario. Leaving cluster."
-                      /vernemq/bin/vmq-admin cluster leave node=${terminating_node_name} -k && rm -rf /vernemq/data/*
-                    else
-                      echo "Reschedule is true. Not leaving the cluster."
-                      /vernemq/bin/vmq-admin node stop >/dev/null
-                    fi
-                else
-                    echo "Reschedule is false. Leaving the cluster."
-                    /vernemq/bin/vmq-admin cluster leave node=${terminating_node_name} -k && rm -rf /vernemq/data/*
-                fi
-            fi
+            echo "SigTerm received from Kubernetes."
+            echo "Stopping VerneMQ node $terminating_node_name."
+            /vernemq/bin/vmq-admin node stop >/dev/null
         else
             if [ -n "$DOCKER_VERNEMQ_SWARM" ]; then
                 terminating_node_name=VerneMQ@$(hostname -i)
@@ -310,7 +334,7 @@ sigterm_handler() {
                 echo "Swarm node is leaving the cluster."
                 /vernemq/bin/vmq-admin cluster leave node=${terminating_node_name} -k && rm -rf /vernemq/data/*
             else
-            # In non-k8s mode: Stop the vernemq node gracefully
+            # In non-swarm mode: Stop the VerneMQ node gracefully
             /vernemq/bin/vmq-admin node stop >/dev/null
             fi
         fi
@@ -339,4 +363,15 @@ trap 'sigterm_handler' SIGTERM
 # Start VerneMQ
 /vernemq/bin/vernemq console -noshell -noinput $@ &
 pid=$!
+if [ $start_join_cluster  -eq 1 ]; then
+    mkdir -p /var/log/vernemq/log
+    join_cluster > /var/log/vernemq/log/join_cluster.log &
+fi
+
+if [ -n "$API_KEY" ]; then
+  sleep 60
+  echo "Adding API_KEY..."
+  vmq-admin api-key add key="${API_KEY}" scope="${API_KEY_SCOPE:-mgmt}"
+fi
+
 wait $pid
