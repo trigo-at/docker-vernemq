@@ -9,3 +9,4 @@ TAG_ONLY: true
 SKIP_TESTS: true
 DOCKER_BUILDKIT: '1'
 SOURCE_ROOT: ./vernemq-trigo
+BUILD_CONTEXT: .
