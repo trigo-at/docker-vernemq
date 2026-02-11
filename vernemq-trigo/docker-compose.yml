@@ -1,0 +1,93 @@
+services:
+  vmq1:
+    image: vernemq-trigo:latest
+    container_name: vmq1
+    hostname: vmq1
+    ports:
+      - "1883:1883"   # MQTT
+      - "8080:8080"   # MQTT WebSockets
+      - "8888:8888"   # Health, API, Prometheus Metrics
+      - "3001:3001"   # Web UI
+    environment:
+      DOCKER_VERNEMQ_COMPOSE: "1"
+      DOCKER_VERNEMQ_ALLOW_ANONYMOUS: "on"
+      DOCKER_VERNEMQ_PLUGINS__VMQ_WEB_UI: "on"
+      DOCKER_VERNEMQ_VMQ_WEB_UI__ADMIN__AUTH: password
+      DOCKER_VERNEMQ_VMQ_WEB_UI__ADMIN__USER_NAME: admin
+      DOCKER_VERNEMQ_VMQ_WEB_UI__ADMIN__USER_PWD: verne
+      DOCKER_VERNEMQ_VMQ_WEB_UI__MGMT_API__SCHEME: http
+      DOCKER_VERNEMQ_VMQ_WEB_UI__MGMT_API__PORT: "9800"
+      DOCKER_VERNEMQ_VMQ_WEB_UI__MGMT_API__KEY: abc
+      DOCKER_VERNEMQ_LISTENER__HTTP__API: "0.0.0.0:9800"
+      DOCKER_VERNEMQ_LISTENER__HTTP__API__HTTP_MODULE__VMQ_HTTP_MGMT_API__AUTH__MODE: noauth
+      DOCKER_VERNEMQ_LISTENER__HTTP__HTTP_UI: "0.0.0.0:3001"
+      DOCKER_VERNEMQ_LISTENER__HTTP__HTTP_UI__HTTP_MODULE__VMQ_HTTP_PUB__AUTH__MODE: noauth
+      DOCKER_VERNEMQ_LISTENER__HTTP__HTTP_UI__HTTP_MODULES: vmq_web_ui
+    volumes:
+      - vmq1-data:/vernemq/data
+      - vmq1-log:/vernemq/log
+    networks: [vmqnet]
+
+  vmq2:
+    image: vernemq-trigo:latest
+    container_name: vmq2
+    hostname: vmq2
+    environment:
+      DOCKER_VERNEMQ_COMPOSE: "1"
+      DOCKER_VERNEMQ_DISCOVERY_NODE: vmq1
+      DOCKER_VERNEMQ_ALLOW_ANONYMOUS: "on"
+      DOCKER_VERNEMQ_PLUGINS__VMQ_WEB_UI: "on"
+      DOCKER_VERNEMQ_VMQ_WEB_UI__ADMIN__AUTH: password
+      DOCKER_VERNEMQ_VMQ_WEB_UI__ADMIN__USER_NAME: admin
+      DOCKER_VERNEMQ_VMQ_WEB_UI__ADMIN__USER_PWD: verne
+      DOCKER_VERNEMQ_VMQ_WEB_UI__MGMT_API__SCHEME: http
+      DOCKER_VERNEMQ_VMQ_WEB_UI__MGMT_API__PORT: "9800"
+      DOCKER_VERNEMQ_VMQ_WEB_UI__MGMT_API__KEY: abc
+      DOCKER_VERNEMQ_LISTENER__HTTP__API: "0.0.0.0:9800"
+      DOCKER_VERNEMQ_LISTENER__HTTP__API__HTTP_MODULE__VMQ_HTTP_MGMT_API__AUTH__MODE: noauth
+      DOCKER_VERNEMQ_LISTENER__HTTP__HTTP_UI: "0.0.0.0:3001"
+      DOCKER_VERNEMQ_LISTENER__HTTP__HTTP_UI__HTTP_MODULE__VMQ_HTTP_PUB__AUTH__MODE: noauth
+      DOCKER_VERNEMQ_LISTENER__HTTP__HTTP_UI__HTTP_MODULES: vmq_web_ui
+    volumes:
+      - vmq2-data:/vernemq/data
+      - vmq2-log:/vernemq/log
+    networks: [vmqnet]
+    depends_on: [vmq1]
+
+  vmq3:
+    image: vernemq-trigo:latest
+    container_name: vmq3
+    hostname: vmq3
+    environment:
+      DOCKER_VERNEMQ_COMPOSE: "1"
+      DOCKER_VERNEMQ_DISCOVERY_NODE: vmq1
+      DOCKER_VERNEMQ_ALLOW_ANONYMOUS: "on"
+      DOCKER_VERNEMQ_PLUGINS__VMQ_WEB_UI: "on"
+      DOCKER_VERNEMQ_VMQ_WEB_UI__ADMIN__AUTH: password
+      DOCKER_VERNEMQ_VMQ_WEB_UI__ADMIN__USER_NAME: admin
+      DOCKER_VERNEMQ_VMQ_WEB_UI__ADMIN__USER_PWD: verne
+      DOCKER_VERNEMQ_VMQ_WEB_UI__MGMT_API__SCHEME: http
+      DOCKER_VERNEMQ_VMQ_WEB_UI__MGMT_API__PORT: "9800"
+      DOCKER_VERNEMQ_VMQ_WEB_UI__MGMT_API__KEY: abc
+      DOCKER_VERNEMQ_LISTENER__HTTP__API: "0.0.0.0:9800"
+      DOCKER_VERNEMQ_LISTENER__HTTP__API__HTTP_MODULE__VMQ_HTTP_MGMT_API__AUTH__MODE: noauth
+      DOCKER_VERNEMQ_LISTENER__HTTP__HTTP_UI: "0.0.0.0:3001"
+      DOCKER_VERNEMQ_LISTENER__HTTP__HTTP_UI__HTTP_MODULE__VMQ_HTTP_PUB__AUTH__MODE: noauth
+      DOCKER_VERNEMQ_LISTENER__HTTP__HTTP_UI__HTTP_MODULES: vmq_web_ui
+    volumes:
+      - vmq3-data:/vernemq/data
+      - vmq3-log:/vernemq/log
+    networks: [vmqnet]
+    depends_on: [vmq1]
+
+networks:
+  vmqnet:
+    driver: bridge
+
+volumes:
+  vmq1-data:
+  vmq1-log:
+  vmq2-data:
+  vmq2-log:
+  vmq3-data:
+  vmq3-log:

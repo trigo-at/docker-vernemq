@@ -1,0 +1,11 @@
+PROJECT: vernemq
+BUILD_TYPE: monorepo
+PUBLISH_CONFIG:
+  master:
+    cluster: okd01
+    environments:
+      - staging
+TAG_ONLY: true
+SKIP_TESTS: true
+DOCKER_BUILDKIT: '1'
+SOURCE_ROOT: ./vernemq-trigo
