@@ -5,8 +5,10 @@ PUBLISH_CONFIG:
     cluster: okd01
     environments:
       - staging
+    services:             # only build these services on main
+      - vernemq-trigo
 TAG_ONLY: true
 SKIP_TESTS: true
 DOCKER_BUILDKIT: '1'
-SOURCE_ROOT: ./vernemq-trigo
-BUILD_CONTEXT: .
+# SOURCE_ROOT: ./vernemq-trigo
+# BUILD_CONTEXT: .
