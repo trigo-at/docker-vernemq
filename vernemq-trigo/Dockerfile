@@ -20,14 +20,10 @@ RUN mkdir -p /vernemq && \
 # ---------- builder: build vmq_webadmin frontend (dist/) ----------
 FROM node:20-bookworm-slim AS webui-builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
 RUN corepack enable
 
 WORKDIR /webui
-RUN git clone https://github.com/vernemq/vmq_webadmin.git .
+COPY vmq_webadmin/ .
 RUN pnpm install
 RUN pnpm build
 

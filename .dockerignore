@@ -7,3 +7,6 @@ LICENSE
 README.md
 
 .travis.yml
+
+vmq_webadmin/node_modules/
+vmq_webadmin/dist/
