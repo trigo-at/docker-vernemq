@@ -8,8 +8,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
-RUN git clone https://github.com/vernemq/vernemq.git .
-RUN git checkout ${VERNEMQ_TAG}
+# RUN git clone https://github.com/vernemq/vernemq.git .
+RUN git clone https://github.com/trigo-at/vernemq.git .
+# RUN git checkout ${VERNEMQ_TAG}
 
 RUN make rel
 
