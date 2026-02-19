@@ -65,8 +65,13 @@ const disconnectSession = async (item: any) => {
 }
 
 const buildSearchPath = (value: string) => {
-  const filterParam = searchType.value === 'client_id' ? `client_id=${value}` : `user=${value}`
-  return `/api/v1/session/show?${filterParam}&--client_id&--user&--is_online&--offline_messages&--online_messages&--mountpoint&--peer_host&--peer_port&--queue_started_at&--session_started_at`
+  // The session/show endpoint only accepts --flag style params (KeySpecs = []).
+  // --field=value acts as both column selector and exact-match filter.
+  // A leading ~ makes it a regex match: --field=~pattern
+  const isClientId = searchType.value === 'client_id'
+  const filterParam = isClientId ? `--client_id=${value}` : `--user=${value}`
+  const otherField = isClientId ? '--user' : '--client_id'
+  return `/api/v1/session/show?${filterParam}&${otherField}&--is_online&--offline_messages&--online_messages&--mountpoint&--peer_host&--peer_port&--queue_started_at&--session_started_at`
 }
 
 const search = async () => {
