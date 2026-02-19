@@ -32,7 +32,9 @@ const nodeItemProps = (item: any) => ({
   subtitle: item.Node === ALL_NODES ? 'Search all nodes' : (item.Running ? 'Running' : 'Stopped'),
 })
 
-const sessionHeaders: DataTableHeader[] = [
+const resultedFromAllNodes = ref(false)
+
+const sessionHeaders = computed<DataTableHeader[]>(() => [
   { title: 'Client Id', key: 'client_id' },
   { title: 'User', key: 'user' },
   { title: 'Online', key: 'is_online' },
@@ -40,8 +42,9 @@ const sessionHeaders: DataTableHeader[] = [
   { title: 'Online Msg', key: 'online_messages' },
   { title: 'Peer Host', key: 'peer_host' },
   { title: 'Peer Port', key: 'peer_port' },
+  ...(resultedFromAllNodes.value ? [{ title: 'Node', key: 'Node' } as DataTableHeader] : []),
   { title: 'Actions', key: 'actions', sortable: false },
-]
+])
 
 const reauthorizeSession = async (item: any) => {
   try {
@@ -64,14 +67,17 @@ const disconnectSession = async (item: any) => {
   }
 }
 
-const buildSearchPath = (value: string) => {
+const buildSearchPath = (value: string, node?: string) => {
   // The session/show endpoint only accepts --flag style params (KeySpecs = []).
   // --field=value acts as both column selector and exact-match filter.
   // A leading ~ makes it a regex match: --field=~pattern
   const isClientId = searchType.value === 'client_id'
   const filterParam = isClientId ? `--client_id=${value}` : `--user=${value}`
   const otherField = isClientId ? '--user' : '--client_id'
-  return `/api/v1/session/show?${filterParam}&${otherField}&--is_online&--offline_messages&--online_messages&--mountpoint&--peer_host&--peer_port&--queue_started_at&--session_started_at`
+  // --node= restricts the cluster-wide query to a single node's sessions.
+  // Without it each node returns the full cluster result, causing duplicates.
+  const nodeParam = node ? `&--node=${node}` : ''
+  return `/api/v1/session/show?${filterParam}&${otherField}&--is_online&--offline_messages&--online_messages&--mountpoint&--peer_host&--peer_port&--queue_started_at&--session_started_at${nodeParam}`
 }
 
 const search = async () => {
@@ -83,19 +89,20 @@ const search = async () => {
 
   isSearching.value = true
   hasSearched.value = true
+  resultedFromAllNodes.value = selectedNode.value === ALL_NODES
 
   try {
-    const path = buildSearchPath(trimmed)
-
     if (selectedNode.value === ALL_NODES) {
       const results = await Promise.all(
         nodes.value.map(async (node: any) => {
-          const response = await doVerneMQAPICall(node.Node, path)
+          const nodePath = buildSearchPath(trimmed, node.Node)
+          const response = await doVerneMQAPICall(node.Node, nodePath)
           return transformTableToArray(response.data, node.Node)
         })
       )
       searchResults.value = results.flat()
     } else {
+      const path = buildSearchPath(trimmed)
       const response = await doVerneMQAPICall(selectedNode.value, path)
       searchResults.value = transformTableToArray(response.data, selectedNode.value)
     }
